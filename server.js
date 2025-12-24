@@ -1,81 +1,71 @@
-require("dotenv").config();
+// Load dotenv ONLY in local development
+if (process.env.NODE_ENV !== "production") {
+  require("dotenv").config();
+}
 
 const express = require("express");
 const cors = require("cors");
-const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 const app = express();
-const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: "50mb" }));
+app.use(express.json({ limit: "10mb" }));
 
-// Gemini client
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
-// Health check
+// Health check route (VERY IMPORTANT for Render)
 app.get("/", (req, res) => {
-  res.send("✅ Gemini 2.5 Flash backend running");
+  res.send("✅ Backend is running");
 });
 
-// Receive screenshot and send to Gemini
+// Main solve route
 app.post("/solve", async (req, res) => {
   try {
     const { image } = req.body;
 
     if (!image) {
-      return res.status(400).json({ success: false, message: "No image received" });
+      return res.status(400).json({ error: "No image received" });
     }
 
-    console.log("📸 Screenshot received in backend");
-
-    // IMPORTANT: USE ONLY GEMINI 2.5 FLASH
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash"
-    });
-
-    // Convert Base64 to Gemini format
-    const imagePart = {
-      inlineData: {
-        data: image.split(",")[1], // remove base64 prefix
-        mimeType: "image/png"
+    // Gemini API call (Gemini 2.5 Flash compatible)
+    const response = await fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" +
+        process.env.GEMINI_API_KEY,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: "Solve the question shown in this image clearly." },
+                {
+                  inline_data: {
+                    mime_type: "image/png",
+                    data: image,
+                  },
+                },
+              ],
+            },
+          ],
+        }),
       }
-    };
+    );
 
-    const prompt = `
-You are a helpful school tutor.
-Read the question in the image and solve it step-by-step.
-Explain clearly and simply.
-`;
+    const data = await response.json();
 
-    const result = await model.generateContent([
-      prompt,
-      imagePart
-    ]);
+    const answer =
+      data.candidates?.[0]?.content?.parts?.[0]?.text ||
+      "No answer generated";
 
-    const response = result.response.text();
-
-    console.log("✅ Gemini responded");
-
-    res.json({
-      success: true,
-      answer: response
-    });
-
+    res.json({ answer });
   } catch (err) {
-    console.error("❌ Gemini error:", err.message);
-
-    res.status(500).json({
-      success: false,
-      message: "Gemini processing failed"
-    });
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong" });
   }
 });
 
-// Start server
+// IMPORTANT: Render uses process.env.PORT
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`🔥 Backend running on http://localhost:${PORT}`);
-  console.log("🧠 Model in use: gemini-2.5-flash");
+  console.log(`🚀 Backend running on port ${PORT}`);
 });
-
